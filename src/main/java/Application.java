@@ -1,18 +1,21 @@
+import com.google.common.base.Charsets;
+import com.google.common.base.Stopwatch;
+import com.google.common.io.Resources;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
-import java.io.BufferedWriter;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static java.nio.file.StandardOpenOption.APPEND;
-import static java.nio.file.StandardOpenOption.CREATE;
+import static java.nio.file.StandardOpenOption.CREATE_NEW;
 
 public class Application {
 
@@ -20,39 +23,38 @@ public class Application {
 
     private static AtomicInteger count = new AtomicInteger();
 
+    private static Set<String> entries = Collections.newSetFromMap(new ConcurrentHashMap<>());
+
     public static void main(String[] args) throws URISyntaxException, IOException {
-        Path path = Paths.get(System.getProperty("user.dir") + "/result.csv");
-        long time = System.currentTimeMillis();
-        try (BufferedWriter writer = Files.newBufferedWriter(path, CREATE, APPEND)) {
-            URI uri = Application.class.getClassLoader().getResource("Gene_Go.txt").toURI();
-            Files.readAllLines(Paths.get(uri)).stream().map(s -> s.split("\\s")[1])
-                    .forEach(parent -> processId(parent, writer));
-        } catch (Exception x) {
-            x.printStackTrace();
-        }
-        System.out.println("time:" + (System.currentTimeMillis() - time));
+        final Stopwatch stopwatch = Stopwatch.createStarted();
+
+        Resources.readLines(Resources.getResource("Gene_Go.txt"), Charsets.UTF_8)
+                .parallelStream().map(s -> s.split("\\s")[1]).forEach(Application::processId);
+
+        writeToFile();
+
+        System.out.println("Execution time: " + stopwatch.elapsed(TimeUnit.SECONDS) + " seconds");
     }
 
-    private static void processId(String parent, BufferedWriter writer) {
+    private static void writeToFile() throws IOException {
+        Path path = Paths.get(String.format("%s/result_%s.csv", System.getProperty("user.dir"), System.currentTimeMillis()));
+        Files.deleteIfExists(path);
+        Files.write(path, entries, CREATE_NEW);
+    }
+
+    private static void processId(String parent) {
         try {
-            if (count.incrementAndGet() > 100) {
-                System.exit(0);
-            }
+//            if (count.incrementAndGet() > 10) {
+//                writeToFile();
+//                System.exit(0);
+//            }
             String url = String.format("http://www.ebi.ac.uk/QuickGO/GTerm?id=%s&format=mini", parent);
             Document document = Jsoup.connect(url).userAgent(USER_AGENT).get();
-            document.select("table a[href]").stream().filter(e -> e.attr("href").startsWith("GTerm"))
+            document.select("table a[href]").parallelStream().filter(e -> e.attr("href").startsWith("GTerm"))
                     .map(e -> e.attr("href").substring(9))
-                    .forEach(child -> {
-                        try {
-                            writer.write(parent + ";" + child);
-                            writer.newLine();
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    });
-            writer.flush();
+                    .forEach(child -> entries.add(parent + "," + child));
         } catch (Exception e) {
-            System.out.println(e.getMessage());
+            e.printStackTrace();
         }
 
     }
