@@ -21,8 +21,6 @@ public class Application {
 
     public static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/33.0.1750.152 Safari/537.36";
 
-    private static AtomicInteger count = new AtomicInteger();
-
     private static Set<String> entries = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public static void main(String[] args) throws URISyntaxException, IOException {
@@ -44,15 +42,17 @@ public class Application {
 
     private static void processId(String parent) {
         try {
-//            if (count.incrementAndGet() > 10) {
-//                writeToFile();
-//                System.exit(0);
-//            }
             String url = String.format("http://www.ebi.ac.uk/QuickGO/GTerm?id=%s&format=mini", parent);
             Document document = Jsoup.connect(url).userAgent(USER_AGENT).get();
             document.select("table a[href]").parallelStream().filter(e -> e.attr("href").startsWith("GTerm"))
                     .map(e -> e.attr("href").substring(9))
-                    .forEach(child -> entries.add(parent + "," + child));
+                    .forEach(child -> {
+                        final String entry = parent + "," + child;
+                        if (!entries.contains(entry)) {
+                            entries.add(entry);
+                            processId(child);
+                        }
+                    });
         } catch (Exception e) {
             e.printStackTrace();
         }
